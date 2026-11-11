@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../shared/countdown_pill.dart';
 import '../../core/socket/socket_providers.dart';
 
 class PlayerPage extends ConsumerWidget {
@@ -25,6 +26,8 @@ class PlayerPage extends ConsumerWidget {
                 error: (e, _) => 'Error: ${errorText(e)}',
               ),
             ),
+            const SizedBox(height: 12),
+            const CountdownPill(),
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () =>

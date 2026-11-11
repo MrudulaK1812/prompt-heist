@@ -78,8 +78,10 @@ class MockInterceptor extends Interceptor {
       case 'POST /api/player/join':
         final name = (body['fullName'] ?? '').toString().trim();
         final id = (body['entranceId'] ?? '').toString().trim();
-        if (name.isEmpty)
+
+        if (name.isEmpty) {
           return fail(422, 'NAME_REQUIRED', 'Please enter your name.');
+        }
         if (id.isEmpty) {
           return fail(
             422,

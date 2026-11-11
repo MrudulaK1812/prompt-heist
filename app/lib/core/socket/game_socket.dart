@@ -22,8 +22,14 @@ class GameSocket {
   final String? token;
   final Future<void> Function() onHydrate;
 
+  // Test a wrong phone clock with: --dart-define=MOCK_CLOCK_SKEW=120
+  static const _skew = Duration(
+    seconds: int.fromEnvironment('MOCK_CLOCK_SKEW', defaultValue: 0),
+  );
+
   io.Socket? _socket;
   Timer? _mockTimer;
+  DateTime? _mockEnd;
   bool _disposed = false;
   SocketStatus _current = SocketStatus.connecting;
 
@@ -60,15 +66,24 @@ class GameSocket {
   void _connectMock() {
     _mockTimer?.cancel();
     Future<void>.delayed(Duration.zero, _onConnected);
-    _mockTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      _emit('timer:sync', {
-        'roundId': 'rnd_1',
-        'roundEndAt': DateTime.now()
-            .toUtc()
-            .add(const Duration(seconds: 90))
-            .toIso8601String(),
-        'serverNow': DateTime.now().toUtc().toIso8601String(),
-      });
+    Future<void>.delayed(const Duration(milliseconds: 300), _sendMockSync);
+    _mockTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _sendMockSync(),
+    );
+  }
+
+  void _sendMockSync() {
+    final now = DateTime.now().toUtc();
+    // One 90 second round. 5 seconds after it ends, start a new one.
+    if (_mockEnd == null ||
+        now.isAfter(_mockEnd!.add(const Duration(seconds: 5)))) {
+      _mockEnd = now.add(const Duration(seconds: 90));
+    }
+    _emit('timer:sync', {
+      'roundId': 'rnd_1',
+      'roundEndAt': _mockEnd!.add(_skew).toIso8601String(),
+      'serverNow': now.add(_skew).toIso8601String(),
     });
   }
 
