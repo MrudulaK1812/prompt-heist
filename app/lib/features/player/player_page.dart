@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../shared/countdown_pill.dart';
+import '../../core/api/token_store.dart';
 import '../../core/socket/socket_providers.dart';
+import '../../shared/countdown_pill.dart';
 
+/// Dev-only screen at /dev. Remove once FE-08 lands.
 class PlayerPage extends ConsumerWidget {
   const PlayerPage({super.key});
 
@@ -33,6 +35,15 @@ class PlayerPage extends ConsumerWidget {
               onPressed: () =>
                   socket.simulateOffline(const Duration(seconds: 10)),
               child: const Text('Cut network 10s'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () async {
+                ref.read(tokenProvider.notifier).set('dev-token');
+                await Future<void>.delayed(const Duration(milliseconds: 500));
+                ref.read(playerSocketProvider).mockKick();
+              },
+              child: const Text('Simulate: joined on another device'),
             ),
           ],
         ),

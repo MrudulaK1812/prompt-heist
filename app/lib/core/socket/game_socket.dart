@@ -94,6 +94,7 @@ class GameSocket {
       t.cancel();
     }
     _scriptTimers.clear();
+
     void at(int sec, void Function() fn) => _scriptTimers.add(
       Timer(Duration(seconds: sec), () {
         if (!_disposed) fn();
@@ -161,6 +162,10 @@ class GameSocket {
       });
     });
   }
+
+  /// Mock only: pretend the server kicked this device.
+  void mockKick() =>
+      _emit('player:kicked', {'reason': 'REJOINED_ON_ANOTHER_DEVICE'});
 
   Future<void> _onConnected() async {
     if (_disposed) return;

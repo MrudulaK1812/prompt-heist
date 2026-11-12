@@ -111,14 +111,31 @@ class MockInterceptor extends Interceptor {
         }, 201);
 
       case 'POST /api/player/rejoin':
-        if ((body['entranceId'] ?? '') == 'NONE') {
+        final rid = (body['entranceId'] ?? '').toString().trim();
+        if (rid == 'NONE') {
           return fail(
             404,
             'NO_ACTIVE_GAME',
             'No active game found for that ID.',
           );
         }
-        return ok({'playerToken': 'mock-player-token-2', 'player': _player()});
+        if (rid == 'MANY') {
+          return fail(
+            429,
+            'TOO_MANY_ATTEMPTS',
+            'Too many attempts. Try again in a minute.',
+          );
+        }
+        const restored = {
+          'PLAYING': 'PLAYING',
+          'LOCKED': 'LOCKED_100',
+          'PENDING': 'RESULT_PENDING',
+          'DONE': 'COMPLETE',
+        };
+        return ok({
+          'playerToken': 'mock-player-token-2',
+          'player': {..._player(), 'state': restored[rid] ?? 'LOBBY'},
+        });
 
       case 'GET /api/player/me':
         return ok({
