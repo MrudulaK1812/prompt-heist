@@ -54,7 +54,10 @@ class _LobbyPageState extends ConsumerState<LobbyPage> {
     }
 
     // Mock only: play a lobby filling up, then the round starting.
-    if (lobby.ready && !_scripted && currentFlavor == Flavor.mock) {
+    if (lobby.ready &&
+        !lobby.roundStarted &&
+        !_scripted &&
+        currentFlavor == Flavor.mock) {
       _scripted = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'config/router.dart';
 import 'core/api/token_store.dart';
 import 'core/storage/player_session.dart';
+import 'features/player/battle/game_state.dart';
 import 'features/player/kicked_state.dart';
 
 class App extends ConsumerWidget {
@@ -20,6 +21,9 @@ class App extends ConsumerWidget {
       ref.read(tokenProvider.notifier).set(null);
       router.go('/player/kicked');
     });
+
+    // Keep game state alive so it catches round:started while in the lobby.
+    ref.listen(gameProvider, (_, _) {});
 
     return MaterialApp.router(
       title: 'Prompt Heist',

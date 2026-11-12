@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../config/flavor.dart';
+import '../mock/mock_world.dart';
 
 enum SocketStatus { connecting, connected, reconnecting }
 
@@ -29,6 +30,7 @@ class GameSocket {
 
   io.Socket? _socket;
   Timer? _mockTimer;
+  StreamSubscription<(String, Object?)>? _worldSub;
   final _scriptTimers = <Timer>[];
   DateTime? _mockEnd;
   bool _disposed = false;
@@ -66,6 +68,9 @@ class GameSocket {
 
   void _connectMock() {
     _mockTimer?.cancel();
+    _worldSub?.cancel();
+    // Prompt events from the mock world arrive like real socket events.
+    _worldSub = MockWorld.events.stream.listen((e) => _emit(e.$1, e.$2));
     Future<void>.delayed(Duration.zero, _onConnected);
     Future<void>.delayed(const Duration(milliseconds: 300), _sendMockSync);
     _mockTimer = Timer.periodic(
@@ -76,14 +81,18 @@ class GameSocket {
 
   void _sendMockSync() {
     final now = DateTime.now().toUtc();
-    // One 90 second round. 5 seconds after it ends, start a new one.
-    if (_mockEnd == null ||
-        now.isAfter(_mockEnd!.add(const Duration(seconds: 5)))) {
-      _mockEnd = now.add(const Duration(seconds: 90));
+    var end = MockWorld.roundEnd;
+    if (end == null) {
+      // /dev screen only: a free-running 90 second round.
+      if (_mockEnd == null ||
+          now.isAfter(_mockEnd!.add(const Duration(seconds: 5)))) {
+        _mockEnd = now.add(const Duration(seconds: 90));
+      }
+      end = _mockEnd;
     }
     _emit('timer:sync', {
       'roundId': 'rnd_1',
-      'roundEndAt': _mockEnd!.add(_skew).toIso8601String(),
+      'roundEndAt': end!.add(_skew).toIso8601String(),
       'serverNow': now.add(_skew).toIso8601String(),
     });
   }
@@ -144,21 +153,16 @@ class GameSocket {
       });
     });
     at(14, () {
+      MockWorld.startRound();
       final now = DateTime.now().toUtc();
       _emit('round:started', {
         'roundId': 'rnd_1',
         'roundNumber': 1,
-        'durationSeconds': 90,
-        'startedAt': now.toIso8601String(),
-        'roundEndAt': now.add(const Duration(seconds: 90)).toIso8601String(),
-        'serverNow': now.toIso8601String(),
-        'treasure': {
-          'treasureId': 'cnd_1',
-          'title': 'The Golden Chai Cup',
-          'backstory': 'Mock backstory.',
-          'lockObjective': 'Mock objective.',
-          'imageUrl': '',
-        },
+        'durationSeconds': MockWorld.roundSeconds,
+        'startedAt': now.add(_skew).toIso8601String(),
+        'roundEndAt': MockWorld.roundEnd!.add(_skew).toIso8601String(),
+        'serverNow': now.add(_skew).toIso8601String(),
+        'treasure': MockWorld.treasure,
       });
     });
   }
@@ -205,6 +209,7 @@ class GameSocket {
   void dispose() {
     _disposed = true;
     _mockTimer?.cancel();
+    _worldSub?.cancel();
     for (final t in _scriptTimers) {
       t.cancel();
     }

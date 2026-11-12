@@ -1,10 +1,15 @@
 import 'package:dio/dio.dart';
 
+import '../mock/mock_world.dart';
+
 /// Answers the contract endpoints locally in the mock flavour.
 /// Booth codes: "12" works, "99" is claimed, "00" = no open session.
-/// Entrance ID "USED" / "DUP" give the matching errors, "NONE" = NO_ACTIVE_GAME.
+/// Entrance ID "USED" / "DUP" give the matching errors.
+/// Rejoin IDs: NONE, MANY, PLAYING, LOCKED, PENDING, DONE.
+/// Prompt words: "block", "fail", "unlock" (=100), "offline" (fails once, then works on retry).
 class MockInterceptor extends Interceptor {
   String _myLabel = 'Aman';
+  final _offlineOnce = <String>{};
 
   Map<String, dynamic> _player() => {
     'id': 'ply_1',
@@ -138,21 +143,68 @@ class MockInterceptor extends Interceptor {
         });
 
       case 'GET /api/player/me':
+        final mEnd = MockWorld.roundEnd;
+        final playing = mEnd != null;
         return ok({
           'serverNow': DateTime.now().toUtc().toIso8601String(),
-          'player': {..._player(), 'bestScore': null},
+          'player': {
+            ..._player(),
+            'state': playing ? 'PLAYING' : 'LOBBY',
+            'bestScore': MockWorld.best,
+          },
           'session': {
             'id': 'ses_01',
-            'phase': 'JOINING',
+            'phase': playing ? 'PLAYING' : 'JOINING',
             'capacity': 5,
-            'joinedCount': 1,
+            'joinedCount': playing ? 5 : 1,
           },
           'players': [],
-          'treasure': null,
-          'round': null,
-          'prompts': [],
-          'canSubmit': false,
+          'treasure': playing ? MockWorld.treasure : null,
+          'round': playing
+              ? {
+                  'roundId': 'rnd_1',
+                  'roundNumber': 1,
+                  'durationSeconds': MockWorld.roundSeconds,
+                  'startedAt': mEnd
+                      .subtract(const Duration(seconds: MockWorld.roundSeconds))
+                      .toIso8601String(),
+                  'roundEndAt': mEnd.toIso8601String(),
+                }
+              : null,
+          'prompts': MockWorld.prompts,
+          'canSubmit': playing && DateTime.now().toUtc().isBefore(mEnd),
         });
+
+      case 'POST /api/player/prompts':
+        final ptext = (body['text'] ?? '').toString().trim();
+        final pkey = options.headers['Idempotency-Key']?.toString() ?? '';
+        if (pkey.isEmpty) {
+          return fail(400, 'IDEMPOTENCY_KEY_REQUIRED', 'Missing key.');
+        }
+        if (ptext.isEmpty) {
+          return fail(422, 'PROMPT_EMPTY', 'Write something first.');
+        }
+        if (ptext.length > 200) {
+          return fail(422, 'PROMPT_TOO_LONG', 'That prompt is too long.');
+        }
+        final pend = MockWorld.roundEnd;
+        if (pend == null) {
+          return fail(409, 'ROUND_NOT_PLAYING', 'No round is running.');
+        }
+        if (DateTime.now().toUtc().isAfter(pend)) {
+          return fail(409, 'ROUND_EXPIRED', 'Time is up.');
+        }
+        // Word "offline": the first try fails like a dropped network.
+        if (ptext.toLowerCase().contains('offline') && _offlineOnce.add(pkey)) {
+          return handler.reject(
+            DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionError,
+            ),
+          );
+        }
+        final (isNew, record) = MockWorld.submit(ptext, pkey);
+        return ok(record, isNew ? 202 : 200);
 
       case 'GET /api/display/state':
         return ok({

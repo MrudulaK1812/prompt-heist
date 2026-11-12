@@ -11,6 +11,7 @@ import '../features/audience/audience_page.dart' deferred as audience;
 import '../features/controller/controller_page.dart' deferred as controller;
 import '../shared/deferred_page.dart';
 import '../shared/placeholder_page.dart';
+import '../features/player/battle/battle_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -22,10 +23,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/player/rejoin', builder: (_, _) => const RejoinPage()),
       GoRoute(path: '/player/kicked', builder: (_, _) => const KickedPage()),
       GoRoute(path: '/player/lobby', builder: (_, _) => const LobbyPage()),
-      GoRoute(
-        path: '/player/battle',
-        builder: (_, _) => const PlaceholderPage('Battle (FE-08)'),
-      ),
+      GoRoute(path: '/player/battle', builder: (_, _) => const BattlePage()),
       GoRoute(
         path: '/player/timeup',
         builder: (_, _) => const PlaceholderPage('Time up (FE-10)'),
