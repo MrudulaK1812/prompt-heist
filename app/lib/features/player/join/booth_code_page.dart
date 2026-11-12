@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/api_error.dart';
 import '../../../core/api/player_api.dart';
 import 'join_state.dart';
+import '../../../core/api/token_store.dart';
+import '../../../core/storage/player_session.dart';
 
 const _blue = Color(0xFF4285F4);
 const _red = Color(0xFFEA4335);
@@ -47,6 +49,22 @@ class _BoothCodePageState extends ConsumerState<BoothCodePage> {
   bool get _ready => _code.length == 2 && !_busy;
 
   @override
+  void initState() {
+    super.initState();
+
+    // A saved token means this tab already joined. Go straight back.
+    final saved = loadPlayerToken();
+
+    if (saved != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(tokenProvider.notifier).set(saved);
+        context.go('/player/lobby');
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _c1.dispose();
     _c2.dispose();
@@ -57,18 +75,21 @@ class _BoothCodePageState extends ConsumerState<BoothCodePage> {
 
   Future<void> _submit() async {
     if (!_ready) return;
+
     setState(() {
       _busy = true;
       _error = null;
     });
+
     try {
       final r = await ref.read(playerApiProvider).joinCode(_code);
       ref.read(joinSessionProvider.notifier).set(JoinSession.fromJson(r));
+
       if (!mounted) return;
       context.go('/player/join');
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = boothErrorText(e)); // stay here, allow retries
+      setState(() => _error = boothErrorText(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

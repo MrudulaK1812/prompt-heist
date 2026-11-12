@@ -29,6 +29,7 @@ class GameSocket {
 
   io.Socket? _socket;
   Timer? _mockTimer;
+  final _scriptTimers = <Timer>[];
   DateTime? _mockEnd;
   bool _disposed = false;
   SocketStatus _current = SocketStatus.connecting;
@@ -87,6 +88,80 @@ class GameSocket {
     });
   }
 
+  /// Mock only: plays a lobby filling up, names revealed, then the round starting.
+  void mockLobbyScript({required String myLabel}) {
+    for (final t in _scriptTimers) {
+      t.cancel();
+    }
+    _scriptTimers.clear();
+    void at(int sec, void Function() fn) => _scriptTimers.add(
+      Timer(Duration(seconds: sec), () {
+        if (!_disposed) fn();
+      }),
+    );
+
+    for (var n = 2; n <= 5; n++) {
+      at(
+        (n - 1) * 2,
+        () => _emit('player:joined', {'joinedCount': n, 'capacity': 5}),
+      );
+    }
+    at(10, () {
+      _emit('players:revealed', {
+        'players': [
+          {
+            'slotNumber': 1,
+            'label': myLabel,
+            'shape': 'BLUE_CIRCLE',
+            'connection': 'CONNECTED',
+          },
+          {
+            'slotNumber': 2,
+            'label': 'Priya',
+            'shape': 'RED_SQUARE',
+            'connection': 'CONNECTED',
+          },
+          {
+            'slotNumber': 3,
+            'label': 'Rohan',
+            'shape': 'YELLOW_DIAMOND',
+            'connection': 'CONNECTED',
+          },
+          {
+            'slotNumber': 4,
+            'label': 'Meera',
+            'shape': 'GREEN_PILL',
+            'connection': 'CONNECTED',
+          },
+          {
+            'slotNumber': 5,
+            'label': 'Isha',
+            'shape': 'GREEN_CIRCLE',
+            'connection': 'CONNECTED',
+          },
+        ],
+      });
+    });
+    at(14, () {
+      final now = DateTime.now().toUtc();
+      _emit('round:started', {
+        'roundId': 'rnd_1',
+        'roundNumber': 1,
+        'durationSeconds': 90,
+        'startedAt': now.toIso8601String(),
+        'roundEndAt': now.add(const Duration(seconds: 90)).toIso8601String(),
+        'serverNow': now.toIso8601String(),
+        'treasure': {
+          'treasureId': 'cnd_1',
+          'title': 'The Golden Chai Cup',
+          'backstory': 'Mock backstory.',
+          'lockObjective': 'Mock objective.',
+          'imageUrl': '',
+        },
+      });
+    });
+  }
+
   Future<void> _onConnected() async {
     if (_disposed) return;
     _set(SocketStatus.connected);
@@ -125,6 +200,9 @@ class GameSocket {
   void dispose() {
     _disposed = true;
     _mockTimer?.cancel();
+    for (final t in _scriptTimers) {
+      t.cancel();
+    }
     _socket?.dispose();
     _messages.close();
     _status.close();

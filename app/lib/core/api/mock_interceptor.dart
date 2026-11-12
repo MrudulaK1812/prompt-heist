@@ -1,9 +1,19 @@
 import 'package:dio/dio.dart';
 
 /// Answers the contract endpoints locally in the mock flavour.
-/// Magic values: code "12" works, "99" is claimed, "00" = no session.
-/// Entrance ID "USED" / "DUP" give the matching errors, "NONE" gives NO_ACTIVE_GAME.
+/// Booth codes: "12" works, "99" is claimed, "00" = no open session.
+/// Entrance ID "USED" / "DUP" give the matching errors, "NONE" = NO_ACTIVE_GAME.
 class MockInterceptor extends Interceptor {
+  String _myLabel = 'Aman';
+
+  Map<String, dynamic> _player() => {
+    'id': 'ply_1',
+    'slotNumber': 1,
+    'label': _myLabel,
+    'shape': 'BLUE_CIRCLE',
+    'state': 'LOBBY',
+  };
+
   @override
   Future<void> onRequest(
     RequestOptions options,
@@ -42,14 +52,6 @@ class MockInterceptor extends Interceptor {
       ),
     );
 
-    const player = {
-      'id': 'ply_1',
-      'slotNumber': 1,
-      'label': 'Aman',
-      'shape': 'BLUE_CIRCLE',
-      'state': 'LOBBY',
-    };
-
     switch (key) {
       case 'POST /api/player/join/code':
         final code = body['code'];
@@ -78,7 +80,6 @@ class MockInterceptor extends Interceptor {
       case 'POST /api/player/join':
         final name = (body['fullName'] ?? '').toString().trim();
         final id = (body['entranceId'] ?? '').toString().trim();
-
         if (name.isEmpty) {
           return fail(422, 'NAME_REQUIRED', 'Please enter your name.');
         }
@@ -103,7 +104,11 @@ class MockInterceptor extends Interceptor {
             'This entrance ID is already in this game.',
           );
         }
-        return ok({'playerToken': 'mock-player-token', 'player': player}, 201);
+        _myLabel = name.split(' ').first;
+        return ok({
+          'playerToken': 'mock-player-token',
+          'player': _player(),
+        }, 201);
 
       case 'POST /api/player/rejoin':
         if ((body['entranceId'] ?? '') == 'NONE') {
@@ -113,17 +118,17 @@ class MockInterceptor extends Interceptor {
             'No active game found for that ID.',
           );
         }
-        return ok({'playerToken': 'mock-player-token-2', 'player': player});
+        return ok({'playerToken': 'mock-player-token-2', 'player': _player()});
 
       case 'GET /api/player/me':
         return ok({
           'serverNow': DateTime.now().toUtc().toIso8601String(),
-          'player': {...player, 'bestScore': null},
+          'player': {..._player(), 'bestScore': null},
           'session': {
             'id': 'ses_01',
             'phase': 'JOINING',
             'capacity': 5,
-            'joinedCount': 3,
+            'joinedCount': 1,
           },
           'players': [],
           'treasure': null,
