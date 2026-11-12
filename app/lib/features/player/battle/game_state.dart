@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -47,6 +49,15 @@ class RoundInfo {
 
 enum PromptStage { submitting, evaluating, scored, blocked, failed }
 
+/// Server prompt status -> what the card shows.
+PromptStage stageFor(String status, int? score) => switch (status) {
+  'SCORED' ||
+  'DISPLAYED' => score != null ? PromptStage.scored : PromptStage.evaluating,
+  'BLOCKED' => PromptStage.blocked,
+  'FAILED' => PromptStage.failed,
+  _ => PromptStage.evaluating,
+};
+
 class PromptItem {
   const PromptItem({
     required this.key, // the idempotency key, made before the first send
@@ -87,19 +98,12 @@ class PromptItem {
 
   factory PromptItem.fromServer(Map<String, dynamic> j) {
     final score = (j['score'] as num?)?.toInt();
-    final stage = switch ('${j['status']}') {
-      'SCORED' || 'DISPLAYED' =>
-        score != null ? PromptStage.scored : PromptStage.evaluating,
-      'BLOCKED' => PromptStage.blocked,
-      'FAILED' => PromptStage.failed,
-      _ => PromptStage.evaluating,
-    };
     return PromptItem(
       key: '${j['promptId']}',
       text: '${j['text']}',
       createdAt: DateTime.tryParse('${j['receivedAt']}') ?? DateTime.now(),
       promptId: '${j['promptId']}',
-      stage: stage,
+      stage: stageFor('${j['status']}', score),
       score: score,
       feedback: j['feedback'] as String?,
       message: j['message'] as String?,
@@ -146,7 +150,10 @@ class GameState {
 }
 
 class GameNotifier extends Notifier<GameState> {
+  static const _pendingLimit = Duration(seconds: 10);
+
   final _items = <PromptItem>[]; // survives rebuilds
+  final _lastPoll = <String, DateTime>{};
   final _uuid = const Uuid();
 
   @override
@@ -158,7 +165,15 @@ class GameNotifier extends Notifier<GameState> {
     // Rebuilds from the server every time the hydrate call is refreshed.
     final me = ref.watch(meProvider).value;
     final sub = ref.watch(playerSocketProvider).messages.listen(_onMessage);
-    ref.onDispose(sub.cancel);
+    // Pending for over 10 seconds? Ask the server directly.
+    final poller = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _pollStale(),
+    );
+    ref.onDispose(() {
+      sub.cancel();
+      poller.cancel();
+    });
     return me == null ? const GameState() : _fromMe(me);
   }
 
@@ -205,6 +220,7 @@ class GameNotifier extends Notifier<GameState> {
           stage: merged.stage,
           score: merged.score,
           feedback: merged.feedback,
+          message: merged.message,
         );
         continue;
       }
@@ -218,6 +234,7 @@ class GameNotifier extends Notifier<GameState> {
           stage: merged.stage,
           score: merged.score,
           feedback: merged.feedback,
+          message: merged.message,
         );
       } else {
         _items.add(merged);
@@ -278,6 +295,45 @@ class GameNotifier extends Notifier<GameState> {
             message: d['message'] as String?,
           ),
         );
+    }
+  }
+
+  void _pollStale() {
+    final now = DateTime.now();
+    for (final p in List.of(_items)) {
+      final id = p.promptId;
+      if (id == null || p.stage != PromptStage.evaluating) continue;
+      final since = _lastPoll[p.key] ?? p.createdAt;
+      if (now.difference(since) < _pendingLimit) continue;
+      _lastPoll[p.key] =
+          now; // ask again in another 10 seconds if still pending
+      _poll(p.key, id);
+    }
+  }
+
+  Future<void> _poll(String key, String id) async {
+    try {
+      final j = await ref.read(playerApiProvider).prompt(id);
+      if (!ref.mounted) return;
+      final score = (j['score'] as num?)?.toInt();
+      final stage = stageFor('${j['status']}', score);
+      if (stage == PromptStage.evaluating) return;
+      _updateBy(
+        (p) => p.key == key,
+        (p) => p.copyWith(
+          stage: stage,
+          score: score,
+          feedback: j['feedback'] as String?,
+          message: j['message'] as String?,
+        ),
+      );
+      if (stage == PromptStage.scored &&
+          score != null &&
+          score > (state.bestScore ?? -1)) {
+        state = state.copyWith(bestScore: score);
+      }
+    } catch (_) {
+      /* try again in 10 seconds */
     }
   }
 

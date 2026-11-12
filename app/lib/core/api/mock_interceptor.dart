@@ -56,6 +56,23 @@ class MockInterceptor extends Interceptor {
         ),
       ),
     );
+    // API 25: GET /api/player/prompts/:id (fallback if a socket event is missed)
+    if (options.method == 'GET' &&
+        options.path.startsWith('/api/player/prompts/')) {
+      final pid = options.path.split('/').last;
+      final found = MockWorld.prompts.where((e) => e['promptId'] == pid);
+      if (found.isEmpty) return fail(404, 'NOT_FOUND', 'Prompt not found.');
+      final p = found.first;
+      return ok({
+        'promptId': pid,
+        'status': p['status'],
+        'score': p['score'],
+        'feedback': p['feedback'],
+        'message': p['message'],
+        'receivedAt': p['receivedAt'],
+        'sequence': p['sequence'],
+      });
+    }
 
     switch (key) {
       case 'POST /api/player/join/code':

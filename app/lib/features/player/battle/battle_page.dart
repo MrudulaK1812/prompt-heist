@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../config/flavor.dart';
 import '../../../core/api/token_store.dart';
+import '../../../core/socket/game_socket.dart';
+import '../../../core/socket/socket_providers.dart';
 import '../../../core/storage/player_session.dart';
 import '../../../core/time/countdown.dart';
 import '../../../shared/countdown_pill.dart';
@@ -40,6 +43,13 @@ class _BattlePageState extends ConsumerState<BattlePage> {
     setState(() {});
   }
 
+  void _edit(String text) {
+    _text.text = text;
+    _text.selection = TextSelection.collapsed(offset: text.length);
+    _focus.requestFocus();
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     // Another device took over this player.
@@ -54,6 +64,10 @@ class _BattlePageState extends ConsumerState<BattlePage> {
 
     final game = ref.watch(gameProvider);
     final clock = ref.watch(countdownProvider);
+    final socket = ref.watch(playerSocketProvider);
+    final socketStatus =
+        ref.watch(socketStatusProvider).value ?? socket.currentStatus;
+    final reconnecting = socketStatus == SocketStatus.reconnecting;
 
     if (!game.ready || game.round == null || game.treasure == null) {
       return const Scaffold(
@@ -76,7 +90,15 @@ class _BattlePageState extends ConsumerState<BattlePage> {
                 children: [
                   const CountdownPill(),
                   const Spacer(),
-                  _BestChip(game.bestScore),
+                  _BestChip(
+                    game.bestScore,
+                    // Mock only: long-press to test the reconnecting state.
+                    onLongPress: currentFlavor == Flavor.mock
+                        ? () => socket.simulateOffline(
+                            const Duration(seconds: 10),
+                          )
+                        : null,
+                  ),
                 ],
               ),
             ),
@@ -86,6 +108,7 @@ class _BattlePageState extends ConsumerState<BattlePage> {
               backgroundColor: Colors.black12,
               color: clock.expired ? _red : _blue,
             ),
+            if (reconnecting) const _ReconnectingBanner(),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.all(16),
@@ -106,6 +129,7 @@ class _BattlePageState extends ConsumerState<BattlePage> {
                       p,
                       key: ValueKey(p.key),
                       onRetry: () => ref.read(gameProvider.notifier).retry(p),
+                      onEdit: () => _edit(p.text),
                     ),
                 ],
               ),
@@ -161,22 +185,53 @@ class _BattlePageState extends ConsumerState<BattlePage> {
   }
 }
 
+class _ReconnectingBanner extends StatelessWidget {
+  const _ReconnectingBanner();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    color: const Color(0xFFFFF4D6),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    child: const Row(
+      children: [
+        SizedBox(
+          width: 14,
+          height: 14,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Reconnecting… your game is still running.',
+            style: TextStyle(fontSize: 13),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _BestChip extends StatelessWidget {
-  const _BestChip(this.best);
+  const _BestChip(this.best, {this.onLongPress});
   final int? best;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final color = best == null ? Colors.black45 : scoreColor(best!);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        'Best: ${best ?? '—'}',
-        style: const TextStyle(fontWeight: FontWeight.w700),
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          'Best: ${best ?? '—'}',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }

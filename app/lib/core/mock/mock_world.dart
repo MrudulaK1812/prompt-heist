@@ -1,7 +1,8 @@
 import 'dart:async';
 
 /// Mock only: one fake round that the mock REST and mock socket both use.
-/// Words in a prompt: "block" = blocked, "fail" = failed, "unlock" = 100.
+/// Words in a prompt: "block" = blocked, "fail" = failed, "unlock" = 100,
+/// "silent" = finishes but sends NO socket event (tests the 10 second check).
 class MockWorld {
   static DateTime? roundEnd; // null = no round running
   static const roundSeconds = 90;
@@ -51,6 +52,8 @@ class MockWorld {
       'status': 'RECEIVED',
       'score': null,
       'feedback': null,
+      'message': null,
+      'sequence': _seq,
       'receivedAt': now,
     });
     Future<void>.delayed(const Duration(seconds: 2), () => _finish(id, text));
@@ -60,20 +63,24 @@ class MockWorld {
   static void _finish(String id, String text) {
     final p = prompts.firstWhere((e) => e['promptId'] == id);
     final lower = text.toLowerCase();
+    final silent = lower.contains('silent');
+    void emit(String event, Map<String, dynamic> data) {
+      if (!silent) events.add((event, data));
+    }
+
     if (lower.contains('block')) {
       const msg =
           'That prompt cannot be displayed. Try a different game-focused prompt.';
       p['status'] = 'BLOCKED';
-      events.add(('prompt:blocked', {'promptId': id, 'message': msg}));
+      p['message'] = msg;
+      emit('prompt:blocked', {'promptId': id, 'message': msg});
       return;
     }
     if (lower.contains('fail')) {
       const msg = 'We could not score that one. Please try again.';
       p['status'] = 'FAILED';
-      events.add((
-        'prompt:failed',
-        {'promptId': id, 'message': msg, 'canRetry': true},
-      ));
+      p['message'] = msg;
+      emit('prompt:failed', {'promptId': id, 'message': msg, 'canRetry': true});
       return;
     }
     final score = lower.contains('unlock') ? 100 : (text.length * 7) % 100;
@@ -86,9 +93,11 @@ class MockWorld {
     p['score'] = score;
     p['feedback'] = feedback;
     if (best == null || score > best!) best = score;
-    events.add((
-      'prompt:scored',
-      {'promptId': id, 'score': score, 'feedback': feedback, 'bestScore': best},
-    ));
+    emit('prompt:scored', {
+      'promptId': id,
+      'score': score,
+      'feedback': feedback,
+      'bestScore': best,
+    });
   }
 }
