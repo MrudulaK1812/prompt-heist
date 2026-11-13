@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../config/flavor.dart';
 import 'audience_state.dart';
+import 'audience_battle.dart';
 
 const _blue = Color(0xFF4285F4);
 const _red = Color(0xFFEA4335);
@@ -25,7 +26,7 @@ class AudiencePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final a = ref.watch(audienceProvider);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.transparent,
       body: SizedBox.expand(
         // Fixed 1920x1080 stage scaled to any screen: 1080p, 4K, no scroll.
         child: FittedBox(
@@ -75,7 +76,7 @@ class AudiencePage extends ConsumerWidget {
       case 'COUNTDOWN':
         return _GetReadyScreen(slots: _slots(a));
       case 'PLAYING':
-        return _simple('Battle', _red); // FE-21 replaces
+        return AudienceBattle(data: a.data); // FE-21 replaces
       case 'RESULT_PENDING':
       case 'RESULTS':
         return _simple('Results', _green); // later

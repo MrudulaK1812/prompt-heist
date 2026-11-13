@@ -6,6 +6,7 @@ import 'core/api/token_store.dart';
 import 'core/storage/player_session.dart';
 import 'features/player/battle/game_state.dart';
 import 'features/player/kicked_state.dart';
+import 'shared/app_background.dart';
 
 class App extends ConsumerWidget {
   const App({super.key});
@@ -47,7 +48,11 @@ class App extends ConsumerWidget {
         useMaterial3: true,
         fontFamily: 'AppSans',
         fontFamilyFallback: const ['AppEmoji'],
+        // Pages show the shared background behind them.
+        scaffoldBackgroundColor: Colors.transparent,
       ),
+      builder: (context, child) =>
+          AppBackground(child: child ?? const SizedBox()),
     );
   }
 }
