@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../config/flavor.dart';
 import '../../core/api/api_client.dart';
+import '../../core/wake/wake_lock.dart';
 
 class AudienceState {
   final bool ready; // first hydrate done
@@ -20,6 +22,7 @@ class AudienceState {
 class AudienceNotifier extends Notifier<AudienceState> {
   @override
   AudienceState build() {
+    keepScreenAwake();
     _load();
     // Re-hydrate every 3s: this is the auto-reconnect safety net.
     final t = Timer.periodic(const Duration(seconds: 3), (_) => _load());
@@ -28,6 +31,12 @@ class AudienceNotifier extends Notifier<AudienceState> {
   }
 
   Future<void> _load() async {
+    // Mock flavour: test any screen with /audience?phase=PLAYING
+    if (currentFlavor == Flavor.mock) {
+      final p = Uri.base.queryParameters['phase'] ?? 'IDLE';
+      state = AudienceState(ready: true, connected: true, phase: p);
+      return;
+    }
     try {
       final res = await ref.read(dioProvider).get('/api/display/state');
       if (!ref.mounted) return;
