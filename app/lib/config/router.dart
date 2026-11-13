@@ -2,16 +2,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/player/player_page.dart';
+import '../features/player/battle/battle_page.dart';
+import '../features/player/finish/cancelled_page.dart';
+import '../features/player/finish/result_page.dart';
+import '../features/player/finish/timeup_page.dart';
 import '../features/player/join/booth_code_page.dart';
+import '../features/player/join/kicked_page.dart';
 import '../features/player/join/name_id_page.dart';
 import '../features/player/join/rejoin_page.dart';
-import '../features/player/join/kicked_page.dart';
 import '../features/player/lobby/lobby_page.dart';
 import '../features/audience/audience_page.dart' deferred as audience;
 import '../features/controller/controller_page.dart' deferred as controller;
 import '../shared/deferred_page.dart';
-import '../shared/placeholder_page.dart';
-import '../features/player/battle/battle_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -24,15 +26,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/player/kicked', builder: (_, _) => const KickedPage()),
       GoRoute(path: '/player/lobby', builder: (_, _) => const LobbyPage()),
       GoRoute(path: '/player/battle', builder: (_, _) => const BattlePage()),
+      GoRoute(path: '/player/timeup', builder: (_, _) => const TimeUpPage()),
+      GoRoute(path: '/player/result', builder: (_, _) => const ResultPage()),
       GoRoute(
-        path: '/player/timeup',
-        builder: (_, _) => const PlaceholderPage('Time up (FE-10)'),
+        path: '/player/cancelled',
+        builder: (_, _) => const CancelledPage(),
       ),
-      GoRoute(
-        path: '/player/result',
-        builder: (_, _) => const PlaceholderPage('Result (FE-10)'),
-      ),
-      // Old test screen (socket + countdown). Remove once FE-08 lands.
+      // Old test screen (socket + countdown). Remove later.
       GoRoute(path: '/dev', builder: (_, _) => const PlayerPage()),
       GoRoute(
         path: '/audience',

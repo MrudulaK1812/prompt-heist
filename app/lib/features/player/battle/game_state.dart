@@ -17,6 +17,7 @@ class Treasure {
     required this.lockObjective,
     required this.imageUrl,
   });
+
   final String title;
   final String backstory;
   final String lockObjective;
@@ -36,6 +37,7 @@ class RoundInfo {
     required this.roundNumber,
     required this.durationSeconds,
   });
+
   final String roundId;
   final int roundNumber;
   final int durationSeconds;
@@ -60,7 +62,7 @@ PromptStage stageFor(String status, int? score) => switch (status) {
 
 class PromptItem {
   const PromptItem({
-    required this.key, // the idempotency key, made before the first send
+    required this.key,
     required this.text,
     required this.createdAt,
     this.promptId,
@@ -98,6 +100,7 @@ class PromptItem {
 
   factory PromptItem.fromServer(Map<String, dynamic> j) {
     final score = (j['score'] as num?)?.toInt();
+
     return PromptItem(
       key: '${j['promptId']}',
       text: '${j['text']}',
@@ -114,36 +117,48 @@ class PromptItem {
 class GameState {
   const GameState({
     this.ready = false,
+    this.phase = '',
     this.treasure,
     this.round,
     this.bestScore,
     this.canSubmit = false,
+    this.locked = false,
+    this.mySlot,
     this.prompts = const [],
     this.superseded = false,
   });
 
   final bool ready;
+  final String phase;
   final Treasure? treasure;
   final RoundInfo? round;
   final int? bestScore;
-  final bool canSubmit; // decided by the server, never by the timer
-  final List<PromptItem> prompts; // oldest first
-  final bool superseded; // another device took over
+  final bool canSubmit;
+  final bool locked;
+  final int? mySlot;
+  final List<PromptItem> prompts;
+  final bool superseded;
 
   GameState copyWith({
     bool? ready,
+    String? phase,
     Treasure? treasure,
     RoundInfo? round,
     int? bestScore,
     bool? canSubmit,
+    bool? locked,
+    int? mySlot,
     List<PromptItem>? prompts,
     bool? superseded,
   }) => GameState(
     ready: ready ?? this.ready,
+    phase: phase ?? this.phase,
     treasure: treasure ?? this.treasure,
     round: round ?? this.round,
     bestScore: bestScore ?? this.bestScore,
     canSubmit: canSubmit ?? this.canSubmit,
+    locked: locked ?? this.locked,
+    mySlot: mySlot ?? this.mySlot,
     prompts: prompts ?? this.prompts,
     superseded: superseded ?? this.superseded,
   );
@@ -152,7 +167,7 @@ class GameState {
 class GameNotifier extends Notifier<GameState> {
   static const _pendingLimit = Duration(seconds: 10);
 
-  final _items = <PromptItem>[]; // survives rebuilds
+  final _items = <PromptItem>[];
   final _lastPoll = <String, DateTime>{};
   final _uuid = const Uuid();
 
@@ -162,29 +177,37 @@ class GameNotifier extends Notifier<GameState> {
       _items.clear();
       return const GameState();
     }
+
     // Rebuilds from the server every time the hydrate call is refreshed.
     final me = ref.watch(meProvider).value;
     final sub = ref.watch(playerSocketProvider).messages.listen(_onMessage);
+
     // Pending for over 10 seconds? Ask the server directly.
     final poller = Timer.periodic(
       const Duration(seconds: 2),
       (_) => _pollStale(),
     );
+
     ref.onDispose(() {
       sub.cancel();
       poller.cancel();
     });
+
     return me == null ? const GameState() : _fromMe(me);
   }
 
   GameState _fromMe(Map<String, dynamic> me) {
     final player = Map<String, dynamic>.from(me['player'] as Map);
+    final session = Map<String, dynamic>.from(me['session'] as Map);
     final t = me['treasure'];
     final r = me['round'];
+
     _mergeServer((me['prompts'] as List?) ?? const []);
+
     if (r is Map) {
       final end = r['roundEndAt'];
       final srv = me['serverNow'];
+
       Future.microtask(() {
         try {
           _seed(end, srv);
@@ -193,14 +216,18 @@ class GameNotifier extends Notifier<GameState> {
         }
       });
     }
+
     return GameState(
       ready: true,
+      phase: '${session['phase']}',
       treasure: t is Map
           ? Treasure.fromJson(Map<String, dynamic>.from(t))
           : null,
       round: r is Map ? RoundInfo.fromJson(Map<String, dynamic>.from(r)) : null,
       bestScore: (player['bestScore'] as num?)?.toInt(),
       canSubmit: me['canSubmit'] == true,
+      locked: player['state'] == 'LOCKED_100',
+      mySlot: (player['slotNumber'] as num?)?.toInt(),
       prompts: List.of(_items),
     );
   }
@@ -214,7 +241,9 @@ class GameNotifier extends Notifier<GameState> {
       final merged = PromptItem.fromServer(
         Map<String, dynamic>.from(raw as Map),
       );
+
       final i = _items.indexWhere((e) => e.promptId == merged.promptId);
+
       if (i >= 0) {
         _items[i] = _items[i].copyWith(
           stage: merged.stage,
@@ -224,10 +253,12 @@ class GameNotifier extends Notifier<GameState> {
         );
         continue;
       }
+
       // A local prompt the server already has, but whose reply we missed.
       final j = _items.indexWhere(
         (e) => e.promptId == null && e.text == merged.text,
       );
+
       if (j >= 0) {
         _items[j] = _items[j].copyWith(
           promptId: merged.promptId,
@@ -240,6 +271,7 @@ class GameNotifier extends Notifier<GameState> {
         _items.add(merged);
       }
     }
+
     _items.sort((a, b) => a.createdAt.compareTo(b.createdAt));
   }
 
@@ -249,6 +281,7 @@ class GameNotifier extends Notifier<GameState> {
   ) {
     final i = _items.indexWhere(test);
     if (i < 0) return;
+
     _items[i] = change(_items[i]);
     state = state.copyWith(prompts: List.of(_items));
   }
@@ -256,19 +289,26 @@ class GameNotifier extends Notifier<GameState> {
   void _onMessage(SocketMessage m) {
     final d = m.data;
     if (d is! Map) return;
+
     switch (m.event) {
       case 'round:started':
         _seed(d['roundEndAt'], d['serverNow']);
+
         final t = d['treasure'];
+
         state = state.copyWith(
           ready: true,
+          phase: 'PLAYING',
           treasure: t is Map
               ? Treasure.fromJson(Map<String, dynamic>.from(t))
               : null,
           round: RoundInfo.fromJson(Map<String, dynamic>.from(d)),
           canSubmit: true,
+          locked: false,
           prompts: List.of(_items),
         );
+        break;
+
       case 'prompt:scored':
         _updateBy(
           (p) => p.promptId == '${d['promptId']}',
@@ -278,7 +318,10 @@ class GameNotifier extends Notifier<GameState> {
             feedback: d['feedback'] as String?,
           ),
         );
+
         state = state.copyWith(bestScore: (d['bestScore'] as num?)?.toInt());
+        break;
+
       case 'prompt:blocked':
         _updateBy(
           (p) => p.promptId == '${d['promptId']}',
@@ -287,6 +330,8 @@ class GameNotifier extends Notifier<GameState> {
             message: d['message'] as String?,
           ),
         );
+        break;
+
       case 'prompt:failed':
         _updateBy(
           (p) => p.promptId == '${d['promptId']}',
@@ -295,18 +340,51 @@ class GameNotifier extends Notifier<GameState> {
             message: d['message'] as String?,
           ),
         );
+        break;
+
+      case 'player:unlocked':
+        // Everyone gets this event. Only lock when it is about me.
+        if ((d['slotNumber'] as num?)?.toInt() == state.mySlot) {
+          state = state.copyWith(locked: true, canSubmit: false);
+        }
+        break;
+
+      case 'round:ended':
+        state = state.copyWith(phase: 'RESULT_PENDING', canSubmit: false);
+        break;
+
+      case 'result:confirmed':
+        state = state.copyWith(phase: 'RESULTS', canSubmit: false);
+        break;
+
+      case 'round:discarded':
+        state = state.copyWith(phase: 'DISCARDED', canSubmit: false);
+        break;
+
+      case 'session:closed':
+        state = state.copyWith(phase: 'CLOSED', canSubmit: false);
+        break;
+
+      case 'phase:changed':
+        state = state.copyWith(phase: '${d['phase']}');
+        break;
     }
   }
 
   void _pollStale() {
     final now = DateTime.now();
+
     for (final p in List.of(_items)) {
       final id = p.promptId;
+
       if (id == null || p.stage != PromptStage.evaluating) continue;
+
       final since = _lastPoll[p.key] ?? p.createdAt;
+
       if (now.difference(since) < _pendingLimit) continue;
-      _lastPoll[p.key] =
-          now; // ask again in another 10 seconds if still pending
+
+      _lastPoll[p.key] = now;
+      // Ask again in another 10 seconds if still pending.
       _poll(p.key, id);
     }
   }
@@ -314,10 +392,14 @@ class GameNotifier extends Notifier<GameState> {
   Future<void> _poll(String key, String id) async {
     try {
       final j = await ref.read(playerApiProvider).prompt(id);
+
       if (!ref.mounted) return;
+
       final score = (j['score'] as num?)?.toInt();
       final stage = stageFor('${j['status']}', score);
+
       if (stage == PromptStage.evaluating) return;
+
       _updateBy(
         (p) => p.key == key,
         (p) => p.copyWith(
@@ -327,6 +409,7 @@ class GameNotifier extends Notifier<GameState> {
           message: j['message'] as String?,
         ),
       );
+
       if (stage == PromptStage.scored &&
           score != null &&
           score > (state.bestScore ?? -1)) {
@@ -340,14 +423,18 @@ class GameNotifier extends Notifier<GameState> {
   /// A new prompt: the idempotency key is made here, once, before sending.
   Future<void> submit(String raw) async {
     final text = raw.trim();
+
     if (text.isEmpty || text.length > 200 || !state.canSubmit) return;
+
     final item = PromptItem(
       key: _uuid.v4(),
       text: text,
       createdAt: DateTime.now(),
     );
+
     _items.add(item);
     state = state.copyWith(prompts: List.of(_items));
+
     await _send(item.key);
   }
 
@@ -358,6 +445,7 @@ class GameNotifier extends Notifier<GameState> {
         (p) => p.key == item.key,
         (p) => p.copyWith(stage: PromptStage.submitting),
       );
+
       await _send(item.key);
     } else {
       await submit(item.text);
@@ -366,9 +454,12 @@ class GameNotifier extends Notifier<GameState> {
 
   Future<void> _send(String key) async {
     final item = _items.firstWhere((p) => p.key == key);
+
     try {
       final r = await ref.read(playerApiProvider).submitPrompt(item.text, key);
+
       if (!ref.mounted) return;
+
       _updateBy(
         (p) => p.key == key,
         (p) => p.copyWith(
@@ -381,7 +472,9 @@ class GameNotifier extends Notifier<GameState> {
       );
     } catch (e) {
       if (!ref.mounted) return;
+
       var msg = 'Something went wrong. Please try again.';
+
       if (e is ApiException) {
         msg = switch (e.code) {
           'ROUND_EXPIRED' ||
@@ -391,10 +484,12 @@ class GameNotifier extends Notifier<GameState> {
           'NETWORK_ERROR' => 'No connection. Tap retry.',
           _ => e.message,
         };
+
         if (e.code == 'TOKEN_SUPERSEDED') {
           state = state.copyWith(superseded: true);
         }
       }
+
       _updateBy(
         (p) => p.key == key,
         (p) => p.copyWith(stage: PromptStage.failed, message: msg),

@@ -22,8 +22,23 @@ class App extends ConsumerWidget {
       router.go('/player/kicked');
     });
 
-    // Keep game state alive so it catches round:started while in the lobby.
-    ref.listen(gameProvider, (_, _) {});
+    // The session phase decides the screen. This also keeps game state alive
+    // from the lobby onward, so it catches every event.
+    ref.listen<String>(gameProvider.select((g) => g.phase), (prev, phase) {
+      switch (phase) {
+        case 'RESULT_PENDING':
+          router.go('/player/timeup');
+        case 'RESULTS':
+          router.go('/player/result');
+        case 'DISCARDED':
+          router.go('/player/cancelled');
+        case 'CLOSED':
+          // Session over: clear this phone, back to the booth code screen.
+          forgetPlayerToken();
+          ref.read(tokenProvider.notifier).set(null);
+          router.go('/player');
+      }
+    });
 
     return MaterialApp.router(
       title: 'Prompt Heist',

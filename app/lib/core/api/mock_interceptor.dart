@@ -6,7 +6,7 @@ import '../mock/mock_world.dart';
 /// Booth codes: "12" works, "99" is claimed, "00" = no open session.
 /// Entrance ID "USED" / "DUP" give the matching errors.
 /// Rejoin IDs: NONE, MANY, PLAYING, LOCKED, PENDING, DONE.
-/// Prompt words: "block", "fail", "unlock" (=100), "offline" (fails once, then works on retry).
+/// Prompt words are listed in mock_world.dart ("offline" fails once here).
 class MockInterceptor extends Interceptor {
   String _myLabel = 'Aman';
   final _offlineOnce = <String>{};
@@ -56,6 +56,7 @@ class MockInterceptor extends Interceptor {
         ),
       ),
     );
+
     // API 25: GET /api/player/prompts/:id (fallback if a socket event is missed)
     if (options.method == 'GET' &&
         options.path.startsWith('/api/player/prompts/')) {
@@ -127,6 +128,8 @@ class MockInterceptor extends Interceptor {
           );
         }
         _myLabel = name.split(' ').first;
+        MockWorld.reset(); // a fresh game for every join
+        MockWorld.myLabel = _myLabel;
         return ok({
           'playerToken': 'mock-player-token',
           'player': _player(),
@@ -160,37 +163,10 @@ class MockInterceptor extends Interceptor {
         });
 
       case 'GET /api/player/me':
-        final mEnd = MockWorld.roundEnd;
-        final playing = mEnd != null;
-        return ok({
-          'serverNow': DateTime.now().toUtc().toIso8601String(),
-          'player': {
-            ..._player(),
-            'state': playing ? 'PLAYING' : 'LOBBY',
-            'bestScore': MockWorld.best,
-          },
-          'session': {
-            'id': 'ses_01',
-            'phase': playing ? 'PLAYING' : 'JOINING',
-            'capacity': 5,
-            'joinedCount': playing ? 5 : 1,
-          },
-          'players': [],
-          'treasure': playing ? MockWorld.treasure : null,
-          'round': playing
-              ? {
-                  'roundId': 'rnd_1',
-                  'roundNumber': 1,
-                  'durationSeconds': MockWorld.roundSeconds,
-                  'startedAt': mEnd
-                      .subtract(const Duration(seconds: MockWorld.roundSeconds))
-                      .toIso8601String(),
-                  'roundEndAt': mEnd.toIso8601String(),
-                }
-              : null,
-          'prompts': MockWorld.prompts,
-          'canSubmit': playing && DateTime.now().toUtc().isBefore(mEnd),
-        });
+        return ok(MockWorld.me(_player()));
+
+      case 'GET /api/player/result':
+        return ok(MockWorld.result());
 
       case 'POST /api/player/prompts':
         final ptext = (body['text'] ?? '').toString().trim();
@@ -204,11 +180,18 @@ class MockInterceptor extends Interceptor {
         if (ptext.length > 200) {
           return fail(422, 'PROMPT_TOO_LONG', 'That prompt is too long.');
         }
-        final pend = MockWorld.roundEnd;
-        if (pend == null) {
+        if (MockWorld.phase != 'PLAYING') {
           return fail(409, 'ROUND_NOT_PLAYING', 'No round is running.');
         }
-        if (DateTime.now().toUtc().isAfter(pend)) {
+        if (MockWorld.locked) {
+          return fail(
+            409,
+            'PLAYER_LOCKED',
+            'You already unlocked the treasure.',
+          );
+        }
+        final pend = MockWorld.roundEnd;
+        if (pend != null && DateTime.now().toUtc().isAfter(pend)) {
           return fail(409, 'ROUND_EXPIRED', 'Time is up.');
         }
         // Word "offline": the first try fails like a dropped network.

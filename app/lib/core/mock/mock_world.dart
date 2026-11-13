@@ -1,15 +1,21 @@
 import 'dart:async';
 
-/// Mock only: one fake round that the mock REST and mock socket both use.
-/// Words in a prompt: "block" = blocked, "fail" = failed, "unlock" = 100,
-/// "silent" = finishes but sends NO socket event (tests the 10 second check).
+/// Mock only: one fake game that the mock REST and mock socket both use.
+/// Prompt words: "unlock" = 100 and locks you, "finish" = end the round now,
+/// "discard" = round cancelled, "block", "fail", "silent" (no socket event).
 class MockWorld {
-  static DateTime? roundEnd; // null = no round running
+  static String phase =
+      'JOINING'; // JOINING PLAYING RESULT_PENDING RESULTS DISCARDED CLOSED
+  static DateTime? roundEnd;
   static const roundSeconds = 90;
+  static String myLabel = 'Aman';
+  static bool locked = false;
   static int? best;
   static int _seq = 0;
   static final prompts = <Map<String, dynamic>>[];
   static final _byKey = <String, Map<String, dynamic>>{};
+  static final _timers = <Timer>[];
+  static Map<String, dynamic>? _result;
   static final events = StreamController<(String, Object?)>.broadcast();
 
   static const treasure = {
@@ -22,14 +28,161 @@ class MockWorld {
     'imageUrl': '',
   };
 
+  static void reset() {
+    for (final t in _timers) {
+      t.cancel();
+    }
+    _timers.clear();
+    phase = 'JOINING';
+    roundEnd = null;
+    locked = false;
+    best = null;
+    _seq = 0;
+    _result = null;
+    prompts.clear();
+    _byKey.clear();
+  }
+
   static void startRound() {
+    reset();
+    phase = 'PLAYING';
     roundEnd = DateTime.now().toUtc().add(
       const Duration(seconds: roundSeconds),
     );
-    prompts.clear();
-    _byKey.clear();
-    best = null;
-    _seq = 0;
+    _timers.add(Timer(const Duration(seconds: roundSeconds), endRound));
+  }
+
+  /// Time is up (also used by the "finish" prompt word).
+  static void endRound() {
+    if (phase != 'PLAYING') return;
+    phase = 'RESULT_PENDING';
+    roundEnd = DateTime.now().toUtc();
+    events.add((
+      'round:ended',
+      {'roundId': 'rnd_1', 'endedAt': roundEnd!.toIso8601String()},
+    ));
+    _timers.add(Timer(const Duration(seconds: 4), _confirm));
+  }
+
+  static void _confirm() {
+    if (phase != 'RESULT_PENDING') return;
+    final others = [
+      ('Rohan', 3, 'YELLOW_DIAMOND', 73),
+      ('Priya', 2, 'RED_SQUARE', 58),
+      ('Meera', 4, 'GREEN_PILL', 41),
+      ('Isha', 5, 'GREEN_CIRCLE', 20),
+    ];
+    final rows = <Map<String, dynamic>>[
+      {
+        'slotNumber': 1,
+        'label': myLabel,
+        'shape': 'BLUE_CIRCLE',
+        'bestScore': best,
+      },
+      for (final o in others)
+        {'slotNumber': o.$2, 'label': o.$1, 'shape': o.$3, 'bestScore': o.$4},
+    ];
+    // A player with no score ranks below everyone with a score.
+    rows.sort(
+      (a, b) => ((b['bestScore'] as int?) ?? -1).compareTo(
+        (a['bestScore'] as int?) ?? -1,
+      ),
+    );
+    final ranking = [
+      for (var i = 0; i < rows.length; i++) {'rank': i + 1, ...rows[i]},
+    ];
+    final mine = ranking.firstWhere((r) => r['slotNumber'] == 1);
+    final winner = Map<String, dynamic>.from(ranking.first)..remove('rank');
+    _result = {
+      'status': 'CONFIRMED',
+      'roundNumber': 1,
+      'myRank': mine['rank'],
+      'winner': winner,
+      'ranking': ranking,
+      'tieBreakExplanation': null,
+      'story': {
+        'title': 'The Golden Chai Cup',
+        'backstory':
+            'A sleepy Guard watches over a cup of chai that never goes cold. '
+            'The right words made him smile, and the cup changed hands.',
+        'imageUrl': '',
+      },
+    };
+    phase = 'RESULTS';
+    events.add((
+      'result:confirmed',
+      {
+        'roundId': 'rnd_1',
+        'roundNumber': 1,
+        'winner': winner,
+        'ranking': ranking,
+        'tieBreakExplanation': null,
+      },
+    ));
+    _timers.add(Timer(const Duration(seconds: 25), close));
+  }
+
+  static void close() {
+    phase = 'CLOSED';
+    events.add((
+      'session:closed',
+      {'sessionId': 'ses_01', 'nextSessionOpened': true},
+    ));
+  }
+
+  static void discard() {
+    if (phase != 'PLAYING' && phase != 'RESULT_PENDING') return;
+    for (final t in _timers) {
+      t.cancel();
+    }
+    _timers.clear();
+    phase = 'DISCARDED';
+    events.add((
+      'round:discarded',
+      {'sessionId': 'ses_01', 'roundId': 'rnd_1'},
+    ));
+  }
+
+  static Map<String, dynamic> result() => _result ?? {'status': 'PENDING'};
+
+  /// GET /api/player/me
+  static Map<String, dynamic> me(Map<String, dynamic> player) {
+    final end = roundEnd;
+    final playerState = switch (phase) {
+      'PLAYING' => locked ? 'LOCKED_100' : 'PLAYING',
+      'RESULT_PENDING' => 'RESULT_PENDING',
+      'RESULTS' || 'CLOSED' => 'COMPLETE',
+      _ => 'LOBBY',
+    };
+    return {
+      'serverNow': DateTime.now().toUtc().toIso8601String(),
+      'player': {...player, 'state': playerState, 'bestScore': best},
+      'session': {
+        'id': 'ses_01',
+        'phase': phase,
+        'capacity': 5,
+        'joinedCount': end == null ? 1 : 5,
+      },
+      'players': [],
+      'treasure': end == null ? null : treasure,
+      'round': end == null
+          ? null
+          : {
+              'roundId': 'rnd_1',
+              'roundNumber': 1,
+              'durationSeconds': roundSeconds,
+              'startedAt': end
+                  .subtract(const Duration(seconds: roundSeconds))
+                  .toIso8601String(),
+              'roundEndAt': end.toIso8601String(),
+            },
+      'prompts': prompts,
+      'canSubmit':
+          phase == 'PLAYING' &&
+          !locked &&
+          end != null &&
+          DateTime.now().toUtc().isBefore(end),
+    };
   }
 
   /// Same key twice returns the stored prompt (isNew = false).
@@ -61,8 +214,18 @@ class MockWorld {
   }
 
   static void _finish(String id, String text) {
-    final p = prompts.firstWhere((e) => e['promptId'] == id);
+    final matches = prompts.where((e) => e['promptId'] == id);
+    if (matches.isEmpty) return; // the game was reset meanwhile
+    final p = matches.first;
     final lower = text.toLowerCase();
+    if (lower.contains('discard')) {
+      discard();
+      return;
+    }
+    if (lower.contains('finish')) {
+      endRound();
+      return;
+    }
     final silent = lower.contains('silent');
     void emit(String event, Map<String, dynamic> data) {
       if (!silent) events.add((event, data));
@@ -99,5 +262,13 @@ class MockWorld {
       'feedback': feedback,
       'bestScore': best,
     });
+    if (score == 100 && !locked) {
+      locked = true;
+      emit('player:unlocked', {
+        'slotNumber': 1,
+        'label': myLabel,
+        'unlocked': [myLabel],
+      });
+    }
   }
 }
